@@ -33,6 +33,20 @@ We fork rather than deploy upstream releases directly because:
 
 ## Divergence log
 
+### 2026-05-19 (later) — Deploy script (Stage C)
+
+- Added `scripts/deploy.sh` — fetches a tagged tarball from this fork's
+  GitHub Releases and ssh-deploys it to one of `tuimunki | munki |
+  munkireport`. Credentials read from KeePass at runtime, never
+  embedded. Preserves `.env`, `app/db/db.sqlite`, and `local/*`
+  customisations across the swap. Migrations run via the host's
+  `php@8.3`. Previous install dir is preserved as `*.prev-<timestamp>`
+  for rollback.
+- Deploy is invoked from the Mac Studio operator console — there is
+  intentionally no CI-side deploy job. The CI workflow's only job is
+  to build + publish the tarball as a Release. Deploy is a deliberate
+  human-in-the-loop action.
+
 ### 2026-05-19 — Fork bootstrap + CI
 
 - Forked at upstream `v5.8.1` (commit `cddf0a9`).

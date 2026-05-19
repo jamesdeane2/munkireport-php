@@ -17,6 +17,11 @@
 
 set -euo pipefail
 
+# Homebrew binaries (gh, sshpass, keepassxc-cli) need to be on PATH when
+# the script is invoked from a sandboxed harness that doesn't inherit the
+# operator shell's PATH.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
 REPO="jamesdeane2/munkireport-php"
 KEEPASS_DB="${HOME}/.soma/connections/connections.kdbx"
 KEEPASS_MASTER_FILE="${HOME}/.soma/connections/master.txt"
@@ -41,7 +46,16 @@ if [[ -z "${TAG}" ]]; then
   echo "→ resolved latest release tag: ${TAG}"
 fi
 
-MASTER="$(cat "$KEEPASS_MASTER_FILE")"
+# KeePass master password: env > file > interactive prompt.
+# (Matches the cve-tracker collector pattern, plus interactive fallback.)
+if [[ -n "${KEEPASS_MASTER:-}" ]]; then
+  MASTER="$KEEPASS_MASTER"
+elif [[ -f "$KEEPASS_MASTER_FILE" ]]; then
+  MASTER="$(cat "$KEEPASS_MASTER_FILE")"
+else
+  read -rsp "KeePass master password: " MASTER
+  echo
+fi
 SSH_USER="$(echo "$MASTER" | keepassxc-cli show -s "$KEEPASS_DB" "$HOST_KEEPASS" | awk -F': ' '/^UserName:/ {print $2}')"
 SSH_PW="$(echo "$MASTER" | keepassxc-cli show -s "$KEEPASS_DB" "$HOST_KEEPASS" | awk -F': ' '/^Password:/ {print $2}')"
 unset MASTER
@@ -63,14 +77,22 @@ echo "→ scp tarball to ${HOST_ALIAS} (${HOST_IP})"
 sshpass -p "$SSH_PW" scp -o StrictHostKeyChecking=accept-new \
   "$LOCAL_TARBALL" "${SSH_USER}@${HOST_IP}:${REMOTE_TARBALL}"
 
+# Public hostname per alias (used for the smoke test's Host header)
+case "$HOST_ALIAS" in
+  tuimunki)    VHOST="tuimunki.supportplan.com" ;;
+  munki)       VHOST="munki.supportplan.com" ;;
+  munkireport) VHOST="munkireport.supportplan.com" ;;
+esac
+
 echo "→ extract + swap + migrate on remote"
 sshpass -p "$SSH_PW" ssh -o StrictHostKeyChecking=accept-new "${SSH_USER}@${HOST_IP}" \
-  bash -se -- "$HOST_INSTALL" "$REMOTE_STAGING" "$REMOTE_TARBALL" "$TAG" <<'REMOTE'
+  bash -se -- "$HOST_INSTALL" "$REMOTE_STAGING" "$REMOTE_TARBALL" "$TAG" "$VHOST" <<'REMOTE'
 set -euo pipefail
 INSTALL_PATH="$1"
 STAGING="$2"
 TARBALL="$3"
 TAG="$4"
+VHOST="$5"
 
 mkdir -p "$STAGING"
 tar xzf "$TARBALL" -C "$STAGING"
@@ -110,13 +132,6 @@ echo "→ please migrate (Deprecated noise from MigrationCommand.php filtered)"
 rm -f "$TARBALL"
 rm -rf "$STAGING"
 
-# Smoke (via public hostname derived from install dir name)
-VHOST_NAME="$(basename "$INSTALL_PATH")"
-case "$VHOST_NAME" in
-  munki_repo-php)  VHOST="munki.supportplan.com" ;;
-  munkireport-php) VHOST="munkireport.supportplan.com" ;;
-  *)               VHOST="$(echo "$VHOST_NAME" | sed 's/_repo-php//;s/-php//').supportplan.com" ;;
-esac
 echo "→ smoke test (Host: $VHOST)"
 curl -sS --max-time 6 -k -o /dev/null -w "  HTTP %{http_code}  time=%{time_total}s\n" \
   -H "Host: $VHOST" https://127.0.0.1/index.php || true

@@ -1,3 +1,7 @@
+> **This is a fork.**
+> Maintained at [github.com/jamesdeane2/munkireport-php](https://github.com/jamesdeane2/munkireport-php).
+> Upstream: [github.com/munkireport/munkireport-php](https://github.com/munkireport/munkireport-php). See [CHANGELOG.fork.md](CHANGELOG.fork.md) for what (if anything) diverges from upstream and why.
+> The default branch is `main-iglu`; deploys are date-stamped tags built by GitHub Actions and shipped as tarballs to the Iglu/SupportPlan fleet.
 
 MunkiReport
 ===============

@@ -33,12 +33,22 @@ We fork rather than deploy upstream releases directly because:
 
 ## Divergence log
 
-### 2026-05-19 — Fork bootstrap
+### 2026-05-19 — Fork bootstrap + CI
 
 - Forked at upstream `v5.8.1` (commit `cddf0a9`).
 - Default branch on fork is `main-iglu`, pointing at v5.8.1.
 - No code patches applied. Stock 5.8.1 runs cleanly on PHP 8.3 +
   `illuminate/* 10.16.*` (validated on tuimunki).
+- Added `.github/workflows/build.yml` — builds tarball on push to
+  `main-iglu` and on any tag; tag pushes also publish a GitHub
+  release with the tarball attached.
+- Added `.github/dependabot.yml` — daily composer scan, weekly
+  github-actions scan. PRs target `main-iglu`.
+- Upstream's two workflows (`build-release-tag.yml`,
+  `github-registry.yml`) are left in place. They trigger on `v*` tags
+  and pushes to `5.x` respectively, neither of which we use on our
+  fork, so they're inert. Kept rather than deleted to minimise
+  divergence from upstream and keep the diff narrow.
 - First fork-side tag: `5.8.1-2026.05.19`.
 
 ## Historical context (kept for audit trail)

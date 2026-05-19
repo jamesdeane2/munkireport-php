@@ -1,0 +1,106 @@
+name: Build release tarball
+
+# Stage B of the cve-tracker phase 3 plan: build only, no deploy.
+# Produces a tarball with vendor/ populated, suitable for swap-in deploys.
+# Tags also publish a GitHub release with the tarball attached so the
+# operator can curl + tar manually (and the future deploy job in Stage C
+# can pull it from there).
+
+on:
+  push:
+    branches: [main-iglu]
+    tags: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create releases on tag push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version tag
+        id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            # branch build: 5.8.1-YYYY.MM.DD-shortsha
+            TAG="$(grep -oE '"version": "[^"]+"' composer.json 2>/dev/null | head -1 | cut -d'"' -f4)"
+            [ -z "$TAG" ] && TAG="5.8.1"
+            TAG="${TAG}-$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Computed tag: ${TAG}"
+
+      - name: Set up PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+
+      - name: Composer install (no-dev)
+        run: composer install --no-dev --no-progress --optimize-autoloader --no-interaction
+
+      - name: Sanity check — please boots
+        run: |
+          # Don't run `please migrate` (no DB here) but make sure the
+          # autoloader + please script aren't fatal.
+          php -d display_errors=stderr please --help > /dev/null
+
+      - name: Build tarball
+        id: tarball
+        run: |
+          NAME="munkireport-${{ steps.tag.outputs.tag }}"
+          # Stage tree under a versioned directory so `tar xzf` lands in
+          # a named dir, matching the deploy script's expectation.
+          mkdir -p "_dist/${NAME}"
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='_dist' \
+            --exclude='public/Archive.zip' \
+            --exclude='public/*.dmg' \
+            --exclude='public/musti.zip' \
+            --exclude='public/gp.zip' \
+            --exclude='public/info.zip' \
+            ./ "_dist/${NAME}/"
+          tar -C _dist -czf "${NAME}.tar.gz" "${NAME}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "path=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+          ls -lh "${NAME}.tar.gz"
+          echo "sha256: $(shasum -a 256 ${NAME}.tar.gz | awk '{print $1}')"
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.tarball.outputs.name }}
+          path: ${{ steps.tarball.outputs.path }}
+          retention-days: 90
+
+      - name: Attach to GitHub release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.tarball.outputs.path }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: false
+          body: |
+            Automated build of MunkiReport for the Iglu/SupportPlan fork.
+
+            Stock upstream code at `${{ github.sha }}` (see
+            [CHANGELOG.fork.md](CHANGELOG.fork.md) for divergence from
+            upstream, if any).
+
+            **Deploy**:
+            ```
+            curl -fsSLO https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/munkireport-${{ steps.tag.outputs.tag }}.tar.gz
+            tar xzf munkireport-${{ steps.tag.outputs.tag }}.tar.gz
+            # then swap (see scripts/deploy.sh once Stage C lands)
+            ```

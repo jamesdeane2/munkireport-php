@@ -33,6 +33,30 @@ We fork rather than deploy upstream releases directly because:
 
 ## Divergence log
 
+### 2026-05-19 (later) — First production deploys via the pipeline
+
+- Deployed `5.8.1-2026.05.19.1` to tuimunki, munki, and munkireport
+  via `scripts/deploy.sh` pulling the CI-built tarball from the
+  Release. All three are on 5.8.1 with all migrations applied.
+- **Pre-existing DB inconsistency surfaced on munkireport** during
+  migrate. Three tables (`homebrew_info`, `homebrew`, `sentinelone`)
+  were recorded in the migrations table as having been created
+  (2017–2018, batch 1) but had been dropped at some unrecorded later
+  point. The corresponding modules are not in munkireport's enabled
+  MODULES list, so the gap had been invisible since 5.8.0 never
+  ALTERed these tables. 5.8.1 introduced ALTER migrations for
+  homebrew_info and homebrew, and an UPDATE migration for sentinelone,
+  which surfaced the gap.
+- Remediation: recreated the three tables from their original CREATE
+  migration specs in vendor/, then re-ran `please migrate`. All 13
+  pending migrations applied successfully. Tables remain empty
+  (modules disabled, no data flows in) but the schema is now
+  consistent. DB `quick_check`: ok.
+- Per-host snapshots preserved at `/Users/Shared/*.prev-<ts>` and
+  pre-fix DB snapshot at
+  `/tmp/munkireport-db-pre-homebrew_info-fix-2026-05-19.sqlite` on
+  munkireport (1.4 GB).
+
 ### 2026-05-19 (later) — Deploy script (Stage C)
 
 - Added `scripts/deploy.sh` — fetches a tagged tarball from this fork's

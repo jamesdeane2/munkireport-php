@@ -123,8 +123,25 @@ if [[ -d "$INSTALL_PATH" ]]; then
 fi
 mv "$EXTRACTED" "$INSTALL_PATH"
 
-PHP_BIN="/opt/homebrew/opt/php@8.3/bin/php"
-[[ -x "$PHP_BIN" ]] || PHP_BIN="/opt/homebrew/bin/php"
+# Pick a php binary that matches the currently-running php-fpm.
+# Avoids the broken /opt/homebrew/bin/php (icu4c v74 mismatch on some hosts)
+# and ensures migrate runs against the same version as the live workers.
+PHP_BIN=""
+RUNNING_FPM_PATH="$(ps -o args= -p "$(pgrep -f 'php-fpm: master' | head -1)" 2>/dev/null \
+  | awk '{print $1}')"
+if [[ -n "$RUNNING_FPM_PATH" && "$RUNNING_FPM_PATH" == */sbin/php-fpm ]]; then
+  CANDIDATE="${RUNNING_FPM_PATH%/sbin/php-fpm}/bin/php"
+  [[ -x "$CANDIDATE" ]] && PHP_BIN="$CANDIDATE"
+fi
+if [[ -z "$PHP_BIN" ]]; then
+  for v in php@8.3 php@8.2 php@8.1; do
+    if [[ -x "/opt/homebrew/opt/$v/bin/php" ]]; then
+      PHP_BIN="/opt/homebrew/opt/$v/bin/php"; break
+    fi
+  done
+fi
+[[ -n "$PHP_BIN" ]] || { echo "no usable php binary found"; exit 12; }
+echo "→ using $PHP_BIN for migrate"
 cd "$INSTALL_PATH"
 echo "→ please migrate (Deprecated noise from MigrationCommand.php filtered)"
 "$PHP_BIN" please migrate 2>&1 | grep -v "^Deprecated:" | grep -v "^$" | tail -20 || true
@@ -133,8 +150,17 @@ rm -f "$TARBALL"
 rm -rf "$STAGING"
 
 echo "→ smoke test (Host: $VHOST)"
-curl -sS --max-time 6 -k -o /dev/null -w "  HTTP %{http_code}  time=%{time_total}s\n" \
-  -H "Host: $VHOST" https://127.0.0.1/index.php || true
+# Try HTTPS first (tuimunki/munkireport terminate TLS locally), fall back to
+# HTTP (munki only serves HTTP locally; TLS is at the upstream proxy).
+HTTPS_CODE=$(curl -sS --max-time 4 -k -o /dev/null -w "%{http_code}" \
+  -H "Host: $VHOST" https://127.0.0.1/index.php 2>/dev/null || echo "000")
+if [[ "$HTTPS_CODE" =~ ^[23] ]]; then
+  echo "  HTTPS:443  HTTP $HTTPS_CODE"
+else
+  HTTP_CODE=$(curl -sS --max-time 4 -o /dev/null -w "%{http_code}" \
+    -H "Host: $VHOST" http://127.0.0.1/index.php 2>/dev/null || echo "000")
+  echo "  HTTP:80   HTTP $HTTP_CODE  (HTTPS=$HTTPS_CODE, expected for hosts behind a TLS-terminating proxy)"
+fi
 
 echo "✓ deployed $TAG to $INSTALL_PATH"
 echo "  rollback: mv $INSTALL_PATH $INSTALL_PATH.failed && mv ${INSTALL_PATH}.prev-${TS} $INSTALL_PATH"

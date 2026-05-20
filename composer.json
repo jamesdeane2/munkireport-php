@@ -111,7 +111,7 @@
     "munkireport/power": "^3.0",
     "munkireport/detectx": "^2.0",
     "munkireport/ibridge": "^3.0",
-    "symfony/yaml": "^3.4",
+    "symfony/yaml": "^6.0",
     "munkireport/location": "^1.0",
     "munkireport/filevault_status": "^3.0",
     "munkireport/user_sessions": "^3.0",
